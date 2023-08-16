@@ -42,6 +42,10 @@ echo "Agent install location ${installationDir}"
 echo "Running apt-get update"
 sudo apt-get update
 
+# Install CUrl for application extensions
+echo "Installing extension requirements"
+sudo apt-get -y install curl
+
 # Confirm python available
 if which python3 > /dev/null 2>&1;
 then
