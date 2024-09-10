@@ -259,4 +259,3 @@ def runCommandWithTimeout(command, timeout):
             if e.errno != 3:
                 raise
     return (-1, None)
-
