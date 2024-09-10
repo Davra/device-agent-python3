@@ -8,7 +8,7 @@ downloads.davra.com/agents/device-agent-python3/main/davra-agent.tar.gz
 ## Installation on a device:
 
 ```
-curl -LO  downloads.davra.com/agents/device-agent-python3/main/davra-agent.tar.gz
+curl -LO downloads.davra.com/agents/device-agent-python3/main/davra-agent.tar.gz
 tar -xvf davra-agent.tar.gz
 sudo davra-agent/install.sh
 ```
