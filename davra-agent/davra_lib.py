@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 # Update this when anything changes in the agent
-davraAgentVersion = "2_0_0" 
+davraAgentVersion = "2_0_1" 
 
 installationDir = "/usr/bin/davra"
 # Config file for the agent running on this device

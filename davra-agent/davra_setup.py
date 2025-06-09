@@ -165,7 +165,10 @@ if('mqttBrokerServerHost' not in comDavra.conf):
     # No configuration exists for mqtt
     # Make assumptions for the cloud based scenarios
     if ('davra.com' in comDavra.conf['server']):
-        comDavra.upsertConfigurationItem('mqttBrokerServerHost', 'mqtt.davra.com')
+        inputmqttborker = input("MQTT Server location? (eg mqtt.davra.com) [default: mqtt.davra.com]: ")
+        if not inputmqttborker.strip():
+            inputmqttborker = "mqtt.davra.com"
+        comDavra.upsertConfigurationItem('mqttBrokerServerHost', inputmqttborker)
     elif ('eemlive.com' in comDavra.conf['server']):
         comDavra.upsertConfigurationItem('mqttBrokerServerHost', 'mqtt.eemlive.com')
     else:

@@ -45,6 +45,7 @@ sudo apt-get update
 # Install CUrl for application extensions
 echo "Installing extension requirements"
 sudo apt-get -y install curl
+sudo rm /usr/lib/python3.11/EXTERNALLY-MANAGED
 
 # Confirm python available
 if which python3 > /dev/null 2>&1;
