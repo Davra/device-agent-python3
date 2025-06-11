@@ -45,7 +45,6 @@ sudo apt-get update
 # Install CUrl for application extensions
 echo "Installing extension requirements"
 sudo apt-get -y install curl
-sudo rm /usr/lib/python3.11/EXTERNALLY-MANAGED
 
 # Confirm python available
 if which python3 > /dev/null 2>&1;
@@ -55,6 +54,8 @@ else
     echo "Python3 not found. Installing now."
     sudo apt-get -y install python3
 fi
+
+sudo rm /usr/lib/python3.11/EXTERNALLY-MANAGED
 
 # Confirm required Python libraries available
 # If you add new libraries to the agent, update requirements.txt
