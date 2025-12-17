@@ -177,6 +177,67 @@ if('mqttBrokerServerHost' not in comDavra.conf):
         print(('Setting mqttBroker ' + str(mqttBroker)))
         comDavra.upsertConfigurationItem('mqttBrokerServerHost', mqttBroker)
 
+# Configure MQTT TLS/SSL settings
+if('mqttBrokerServerUseTLS' not in comDavra.conf):
+    # Check if HTTPS is used, suggest TLS for MQTT
+    useTlsDefault = 'Y' if 'https://' in comDavra.conf['server'] else 'N'
+    useTlsInput = input("Enable TLS/SSL for MQTT connection? (Y/N) [default: " + useTlsDefault + "]: ")
+    if not useTlsInput.strip():
+        useTlsInput = useTlsDefault
+    
+    useTls = useTlsInput.upper() in ['Y', 'YES', 'TRUE', '1']
+    comDavra.upsertConfigurationItem('mqttBrokerServerUseTLS', useTls)
+    
+    if useTls:
+        print("Configuring MQTT TLS/SSL settings...")
+        
+        # MQTT Port (default 8883 for TLS)
+        mqttPortInput = input("MQTT Port? [default: 8883]: ")
+        mqttPort = int(mqttPortInput) if mqttPortInput.strip() and mqttPortInput.isdigit() else 8883
+        comDavra.upsertConfigurationItem('mqttBrokerServerPort', mqttPort)
+        
+        # CA Certificate
+        caCertInput = input("Path to CA certificate file? (leave empty to use system default): ")
+        if caCertInput.strip():
+            comDavra.upsertConfigurationItem('mqttBrokerServerCaCert', caCertInput.strip())
+        
+        # Client Certificate (optional, for mutual TLS)
+        clientCertInput = input("Path to client certificate file? (leave empty if not using mutual TLS): ")
+        if clientCertInput.strip():
+            comDavra.upsertConfigurationItem('mqttBrokerServerClientCert', clientCertInput.strip())
+            
+            # Client Key (required if client cert is provided)
+            clientKeyInput = input("Path to client key file? : ")
+            if clientKeyInput.strip():
+                comDavra.upsertConfigurationItem('mqttBrokerServerClientKey', clientKeyInput.strip())
+        
+        # TLS Version - Now optional, with auto-negotiation as default
+        print("\nTLS Version Configuration:")
+        print("  Leave empty for auto-negotiation (recommended)")
+        print("  Or specify: TLSv1.2, TLSv1.3, TLSv1.1, TLSv1")
+        tlsVersionInput = input("TLS Version? [default: auto-negotiate]: ")
+        if tlsVersionInput.strip():
+            comDavra.upsertConfigurationItem('mqttBrokerServerTlsVersion', tlsVersionInput.strip())
+            print("Using TLS version: " + tlsVersionInput.strip())
+        else:
+            # Don't set the config - let it auto-negotiate
+            print("Using TLS auto-negotiation (will use highest version supported by both client and server)")
+        
+        # Certificate verification
+        verifyCertInput = input("Require certificate verification? (Y/N) [default: Y]: ")
+        verifyCert = verifyCertInput.upper() not in ['N', 'NO', 'FALSE', '0']
+        comDavra.upsertConfigurationItem('mqttBrokerServerCertRequired', verifyCert)
+        
+        # Hostname verification
+        verifyHostnameInput = input("Verify certificate hostname? (Y/N) [default: Y]: ")
+        verifyHostname = verifyHostnameInput.upper() not in ['N', 'NO', 'FALSE', '0']
+        comDavra.upsertConfigurationItem('mqttBrokerServerVerifyHostname', verifyHostname)
+        
+        print("MQTT TLS configuration completed.")
+    else:
+        # Set default non-TLS port
+        comDavra.upsertConfigurationItem('mqttBrokerServerPort', 1883)
+
 
 # Reload configuration inside library
 comDavra.loadConfiguration()
