@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 # Update this when anything changes in the agent
-davraAgentVersion = "2_0_2" 
+davraAgentVersion = "2_0_3" 
 
 installationDir = "/usr/bin/davra"
 # Config file for the agent running on this device
@@ -103,7 +103,10 @@ def logWarning(log_msg):
     log(log_msg, "WARN")
 
 def logError(log_msg):
-    log(log_msg.decode('utf8'), "ERROR")
+    # Python 3 strings are already decoded, no need to decode
+    if isinstance(log_msg, bytes):
+        log_msg = log_msg.decode('utf8')
+    log(log_msg, "ERROR")
 
 # Log a message to disk and console
 def log(log_msg, severity = "DEBUG"):
