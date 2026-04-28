@@ -26,7 +26,7 @@ The agent communicates with the Davra platform over MQTT and HTTP REST. Device a
 │                    Davra Platform                    │
 │          (REST API + Remote MQTT Broker)             │
 └───────────────────────┬─────────────────────────────┘
-                        │ HTTPS / MQTTS
+                        │ HTTPS / MQTT(S)
 ┌───────────────────────▼─────────────────────────────┐
 │                  Device Agent                        │
 │              (davra_agent.py)                        │
@@ -99,6 +99,7 @@ Setup will then:
 
 - Verify connectivity to the server
 - Auto-detect the MQTT broker address
+- Configure TLS/SSL settings for the MQTT connection (optional)
 - Set default `heartbeatInterval` (600 seconds) and `scriptMaxTime` (600 seconds)
 - Create default metrics on the platform (`cpu`, `ram`, `uptime`)
 - Write configuration to `/usr/bin/davra/config.json`
@@ -126,8 +127,48 @@ All agent configuration lives in `/usr/bin/davra/config.json`.
 | `scriptMaxTime` | Maximum seconds allowed for a script or function | `600` |
 | `mqttBrokerServerHost` | Remote MQTT broker hostname | `mqtt.davra.com` |
 | `mqttBrokerAgentHost` | Local MQTT broker address | `127.0.0.1` |
+| `mqttBrokerServerPort` | Remote MQTT broker port | `1883` (plain), `8883` (TLS) |
 | `mqttRestrictions` | Set to `"localhost"` to restrict local broker to loopback | `"localhost"` |
 | `capabilities` | Map of registered device capabilities | `{}` |
+
+### MQTT TLS/SSL Configuration
+
+The agent supports secure MQTT connections. TLS can be configured during setup or by manually editing `config.json`.
+
+| Key | Type | Description |
+|---|---|---|
+| `mqttBrokerServerUseTLS` | boolean | Enable TLS for the remote MQTT connection |
+| `mqttBrokerServerPort` | integer | Port override — typically `8883` when TLS is enabled |
+| `mqttBrokerServerCaCert` | string | Path to CA certificate file (uses system default if omitted) |
+| `mqttBrokerServerClientCert` | string | Path to client certificate (for mutual TLS) |
+| `mqttBrokerServerClientKey` | string | Path to client private key (required when client cert is set) |
+| `mqttBrokerServerTlsVersion` | string | TLS version e.g. `"TLSv1.2"` — leave unset for auto-negotiation (recommended) |
+| `mqttBrokerServerCertRequired` | boolean | Enforce certificate verification (default: `true`) |
+| `mqttBrokerServerVerifyHostname` | boolean | Verify the server hostname matches its certificate (default: `true`) |
+
+Example `config.json` snippet for TLS:
+
+```json
+{
+  "mqttBrokerServerHost": "mqtt.davra.com",
+  "mqttBrokerServerUseTLS": true,
+  "mqttBrokerServerPort": 8883,
+  "mqttBrokerServerCaCert": "/path/to/ca.crt",
+  "mqttBrokerServerCertRequired": true,
+  "mqttBrokerServerVerifyHostname": true
+}
+```
+
+For mutual TLS, add:
+
+```json
+{
+  "mqttBrokerServerClientCert": "/path/to/client.crt",
+  "mqttBrokerServerClientKey": "/path/to/client.key"
+}
+```
+
+If TLS settings are absent the agent falls back to a standard unencrypted connection on port 1883.
 
 ### Log File
 
@@ -155,7 +196,7 @@ sudo journalctl -u davra_agent -f
 tail -f /var/log/davra_agent.log
 ```
 
-The service is configured to restart automatically (`Restart=always`, `RestartSec=5`) with a 50-second startup delay to allow network interfaces to initialise.
+The service is configured to restart automatically (`Restart=always`, `RestartSec=5`) with a 50-second startup delay to allow network interfaces to initialize.
 
 ---
 
@@ -201,74 +242,9 @@ These functions can be triggered remotely from the Davra platform:
 
 ## Device Application SDK (`davra_sdk.py`)
 
-The SDK is intended for developers writing Python applications that run on the same device as the agent. Applications communicate with the agent over the local MQTT broker.
+The SDK is for developers writing Python applications that run on the same device as the agent. Applications communicate with the agent over the local MQTT broker.
 
 ### Quick Start
-Also within this repository is the davra_sdk.py which is designed for application developers to use when writing their own device apps.
-
-## MQTT TLS/SSL Support
-
-The agent now supports secure MQTT connections (MQTTS) for enhanced security. TLS/SSL can be configured during setup or by manually editing the configuration file.
-
-### Configuration Options
-
-The following configuration parameters are available in `config.json`:
-
-- **mqttBrokerServerUseTLS** (boolean): Enable/disable TLS for MQTT connection
-- **mqttBrokerServerPort** (integer): MQTT port (default: 1883 for plain, 8883 for TLS)
-- **mqttBrokerServerCaCert** (string, optional): Path to CA certificate file (uses system default if not specified)
-- **mqttBrokerServerClientCert** (string, optional): Path to client certificate file (for mutual TLS authentication)
-- **mqttBrokerServerClientKey** (string, optional): Path to client private key file (required if client cert is provided)
-- **mqttBrokerServerTlsVersion** (string, optional): TLS version to use (TLSv1.2, TLSv1.3, etc.) - **Leave unset for auto-negotiation (recommended)**
-- **mqttBrokerServerCertRequired** (boolean): Require certificate verification (default: true)
-- **mqttBrokerServerVerifyHostname** (boolean): Verify certificate hostname matches server (default: true)
-
-**Note:** The TLS version will auto-negotiate to the highest version supported by both client and server if not specified. This is the recommended configuration for maximum compatibility.
-
-### Setup with TLS
-
-During setup, you'll be prompted to configure TLS settings:
-
-```bash
-sudo python3 davra_setup.py
-```
-
-The setup will ask:
-1. Whether to enable TLS/SSL for MQTT
-2. MQTT port (defaults to 8883 for TLS)
-3. Path to CA certificate (optional)
-4. Path to client certificate and key (optional, for mutual TLS)
-5. TLS version preference
-6. Certificate verification options
-
-### Manual Configuration
-
-You can also manually edit `/usr/bin/davra/config.json` to configure TLS:
-
-```json
-{
-  "mqttBrokerServerHost": "mqtt.davra.com",
-  "mqttBrokerServerUseTLS": true,
-  "mqttBrokerServerPort": 8883,
-  "mqttBrokerServerCaCert": "/path/to/ca.crt",
-  "mqttBrokerServerTlsVersion": "TLSv1.2",
-  "mqttBrokerServerCertRequired": true,
-  "mqttBrokerServerVerifyHostname": true
-}
-```
-
-For mutual TLS authentication, add:
-
-```json
-{
-  "mqttBrokerServerClientCert": "/path/to/client.crt",
-  "mqttBrokerServerClientKey": "/path/to/client.key"
-}
-```
-
-### SDK Usage with TLS
-
-Device applications using `davra_sdk.py` can connect with TLS:
 
 ```python
 import davra_sdk
@@ -315,13 +291,32 @@ davra_sdk.retrieveConfigFromAgent()
 config = davra_sdk.agentConfig  # Populated after the above call returns
 ```
 
+### Connecting with TLS
+
+To connect the SDK with TLS enabled, pass a `tlsConfig` dict to `connectToAgent`:
+
+```python
+import davra_sdk
+
+tls_config = {
+    "ca_certs": "/path/to/ca.crt",
+    "tls_version": "TLSv1.2",
+    "cert_required": True,
+    "verify_hostname": True,
+    "port": 8883
+}
+
+davra_sdk.connectToAgent("my-app", useTls=True, tlsConfig=tls_config)
+davra_sdk.waitUntilAgentIsConnected(timeoutSeconds=30)
+```
+
 ### SDK API Reference
 
 #### Connection
 
 | Function | Description |
 |---|---|
-| `connectToAgent(nameOfApplication)` | Initialises MQTT connection to the local agent. Must be called first. |
+| `connectToAgent(nameOfApplication, useTls=False, tlsConfig=None)` | Initializes MQTT connection to the local agent. Must be called first. |
 | `waitUntilAgentIsConnected(timeoutSeconds)` | Blocks until the agent sends its first heartbeat, or raises on timeout. |
 | `retrieveConfigFromAgent()` | Requests the current configuration from the agent. Result available in `davra_sdk.agentConfig`. |
 
@@ -456,7 +451,12 @@ Produces:
 - The `agent-action-runScriptBash` function executes arbitrary bash scripts sent from the platform. Trust in the platform's access controls is assumed.
 - The local MQTT broker is restricted to `127.0.0.1` by default (`mqttRestrictions: "localhost"`). Changing this exposes it to the network.
 - MQTT authentication (device UUID + API token) is optional and disabled by default. Enable via `useAdvancedMqttAuthorisation`.
-- Script execution is bounded by `scriptMaxTime`, but input to scripts is not sanitised by the agent.
+- Script execution is bounded by `scriptMaxTime`, but input to scripts is not sanitized by the agent.
+- Always use TLS in production environments (`mqttBrokerServerUseTLS: true`).
+- Use TLS 1.2 or higher; leave `mqttBrokerServerTlsVersion` unset for auto-negotiation.
+- Protect private key files with strict permissions (`chmod 600`).
+- Keep certificates current and monitor expiration dates.
+- Enable mutual TLS (`mqttBrokerServerClientCert` + `mqttBrokerServerClientKey`) for additional authentication where supported.
 
 ---
 
@@ -477,28 +477,3 @@ See `LICENSE` file for terms. This software is provided as-is. Davra accepts no 
 ---
 
 > **Reminder:** This project is provided as an open-source reference only. **Davra does not offer support, maintenance, or security updates for this repository.** Community contributions are welcome but will not be actively reviewed.
-# Connect with TLS enabled
-tlsConfig = {
-    "ca_certs": "/path/to/ca.crt",
-    "tls_version": "TLSv1.2",
-    "cert_required": True,
-    "verify_hostname": True,
-    "port": 8883
-}
-
-davra_sdk.connectToAgent("MyApp", useTls=True, tlsConfig=tlsConfig)
-```
-
-### Security Recommendations
-
-1. **Always use TLS in production** environments
-2. **Keep certificates up to date** and monitor expiration dates
-3. **Use certificate verification** (mqttBrokerServerCertRequired: true)
-4. **Verify hostnames** (mqttBrokerServerVerifyHostname: true)
-5. **Use TLSv1.2 or higher** for better security
-6. **Protect private keys** - ensure proper file permissions (chmod 600)
-7. **Use mutual TLS** when possible for additional authentication
-
-### Backward Compatibility
-
-The agent maintains full backward compatibility. If TLS settings are not configured, the agent will use standard unencrypted MQTT connections on port 1883. 
