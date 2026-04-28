@@ -9,6 +9,7 @@ import json
 from pprint import pprint
 import sys, subprocess
 from datetime import datetime
+import ssl
 # Use MQTT to communicate with the davra device agent
 import paho.mqtt.client as mqtt
 
@@ -115,7 +116,7 @@ def mqttOnMessageDevice(client, userdata, msg):
 # This means messages can be heard by this SDK and passed into the nominated function in the Application
 # when they are visible on the mqtt topic  
 mqttClientOfDevice = None
-def connectToAgent(nameOfApplication):
+def connectToAgent(nameOfApplication, useTls=False, tlsConfig=None):
     global mqttClientOfDevice 
     global deviceApplicationName
     deviceApplicationName = nameOfApplication
@@ -129,8 +130,67 @@ def connectToAgent(nameOfApplication):
             if("mqttRestrictions" in conf and "username" in conf["mqttRestrictions"]):
                 mqttClientOfDevice.username_pw_set(conf["UUID"], conf["apiToken"])
                 log('MQTT: Will connect using password to broker running on device' + conf["UUID"])
-        log('Starting to connect to MQTT broker running on device ' + mqttBrokerAgentHost)
-        mqttClientOfDevice.connect(mqttBrokerAgentHost)
+        
+        # Configure TLS/SSL if enabled
+        mqttPort = 8883 if useTls else 1883
+        if tlsConfig and "port" in tlsConfig:
+            mqttPort = tlsConfig["port"]
+            
+        if useTls:
+            log('Configuring MQTT with TLS/SSL encryption')
+            try:
+                if tlsConfig is None:
+                    tlsConfig = {}
+                    
+                ca_certs = tlsConfig.get("ca_certs", None)
+                certfile = tlsConfig.get("certfile", None)
+                keyfile = tlsConfig.get("keyfile", None)
+                # Default to None for auto-negotiation
+                tls_version = tlsConfig.get("tls_version", None)
+                cert_required = tlsConfig.get("cert_required", True)
+                verify_hostname = tlsConfig.get("verify_hostname", True)
+                
+                # Map TLS version string to ssl constant
+                # If no version specified, use PROTOCOL_TLS which auto-negotiates the best version
+                tls_version_map = {
+                    "TLSv1": ssl.PROTOCOL_TLSv1,
+                    "TLSv1.1": ssl.PROTOCOL_TLSv1_1,
+                    "TLSv1.2": ssl.PROTOCOL_TLSv1_2,
+                    "TLS": ssl.PROTOCOL_TLS  # Auto-negotiate best version
+                }
+                # Add TLSv1.3 if available (Python 3.7+)
+                if hasattr(ssl, 'PROTOCOL_TLSv1_3'):
+                    tls_version_map["TLSv1.3"] = ssl.PROTOCOL_TLSv1_3
+                
+                # Use PROTOCOL_TLS as default for auto-negotiation (best practice)
+                if tls_version:
+                    tls_protocol = tls_version_map.get(tls_version, ssl.PROTOCOL_TLS)
+                    log('Using TLS version: ' + tls_version)
+                else:
+                    tls_protocol = ssl.PROTOCOL_TLS
+                    log('Using TLS auto-negotiation (will use highest version supported by both client and server)')
+                
+                # Configure TLS settings
+                mqttClientOfDevice.tls_set(
+                    ca_certs=ca_certs if ca_certs else None,
+                    certfile=certfile if certfile else None,
+                    keyfile=keyfile if keyfile else None,
+                    cert_reqs=ssl.CERT_REQUIRED if cert_required else ssl.CERT_NONE,
+                    tls_version=tls_protocol
+                )
+                
+                # Option to disable certificate hostname verification (not recommended for production)
+                if not verify_hostname:
+                    log('Warning: MQTT TLS hostname verification is disabled - not recommended for production')
+                    mqttClientOfDevice.tls_insecure_set(True)
+                    
+                log('MQTT TLS configuration completed successfully')
+            except Exception as e:
+                log('Error configuring MQTT TLS: ' + str(e))
+                return False
+        
+        log('Starting to connect to MQTT broker running on device ' + mqttBrokerAgentHost + ':' + str(mqttPort) + ' (TLS: ' + str(useTls) + ')')
+        mqttClientOfDevice.connect(mqttBrokerAgentHost, port=mqttPort)
         mqttClientOfDevice.loop_start() # Starts another thread to monitor incoming messages
         time.sleep(2)
         sendMessageFromAppToAgent({"connectToAgent": deviceApplicationName})

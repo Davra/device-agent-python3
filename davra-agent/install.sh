@@ -55,6 +55,8 @@ else
     sudo apt-get -y install python3
 fi
 
+sudo rm /usr/lib/python3.11/EXTERNALLY-MANAGED
+
 # Confirm required Python libraries available
 # If you add new libraries to the agent, update requirements.txt
 echo "Installing Python requirements"

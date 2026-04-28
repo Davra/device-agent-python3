@@ -12,6 +12,7 @@ import json
 from pprint import pprint
 import datetime
 import paho.mqtt.client as mqtt
+import ssl
 import davra_lib as comDavra
 # If you add new libraries to the agent, update requirements.txt
 
@@ -642,11 +643,73 @@ def mqttConnectToServer():
         comDavra.log('Starting to connect to MQTT broker running on Davra server ' + comDavra.conf["mqttBrokerServerHost"])
         apiTokenForDevice = comDavra.conf["apiToken"]
         clientOfServer.username_pw_set(username = comDavra.conf["UUID"], password = apiTokenForDevice)
+        
+        # Configure TLS/SSL if enabled in configuration
+        useTls = comDavra.conf.get("mqttBrokerServerUseTLS", False)
+        mqttPort = comDavra.conf.get("mqttBrokerServerPort", 8883 if useTls else 1883)
+        
+        if useTls:
+            comDavra.log('Configuring MQTT with TLS/SSL encryption')
+            try:
+                # Get TLS configuration from config file
+                ca_certs = comDavra.conf.get("mqttBrokerServerCaCert", None)
+                certfile = comDavra.conf.get("mqttBrokerServerClientCert", None)
+                keyfile = comDavra.conf.get("mqttBrokerServerClientKey", None)
+                # Default to auto-negotiation (PROTOCOL_TLS) for best compatibility
+                tls_version = comDavra.conf.get("mqttBrokerServerTlsVersion", None)
+                cert_required = comDavra.conf.get("mqttBrokerServerCertRequired", True)
+                
+                # Map TLS version string to ssl constant
+                # If no version specified, use PROTOCOL_TLS which auto-negotiates the best version
+                tls_version_map = {
+                    "TLSv1": ssl.PROTOCOL_TLSv1,
+                    "TLSv1.1": ssl.PROTOCOL_TLSv1_1,
+                    "TLSv1.2": ssl.PROTOCOL_TLSv1_2,
+                    "TLS": ssl.PROTOCOL_TLS  # Auto-negotiate best version
+                }
+                # Add TLSv1.3 if available (Python 3.7+)
+                if hasattr(ssl, 'PROTOCOL_TLSv1_3'):
+                    tls_version_map["TLSv1.3"] = ssl.PROTOCOL_TLSv1_3
+                
+                # Use PROTOCOL_TLS as default for auto-negotiation (best practice)
+                if tls_version:
+                    tls_protocol = tls_version_map.get(tls_version, ssl.PROTOCOL_TLS)
+                    comDavra.log('Using TLS version: ' + tls_version)
+                else:
+                    tls_protocol = ssl.PROTOCOL_TLS
+                    comDavra.log('Using TLS auto-negotiation (will use highest version supported by both client and server)')
+                
+                # Configure TLS settings
+                clientOfServer.tls_set(
+                    ca_certs=ca_certs if ca_certs else None,
+                    certfile=certfile if certfile else None,
+                    keyfile=keyfile if keyfile else None,
+                    cert_reqs=ssl.CERT_REQUIRED if cert_required else ssl.CERT_NONE,
+                    tls_version=tls_protocol
+                )
+                
+                # Enable SNI (Server Name Indication) - required by many modern MQTT brokers
+                # This is automatically handled by paho-mqtt when we call connect() with the hostname
+                
+                # Option to disable certificate hostname verification (not recommended for production)
+                if not comDavra.conf.get("mqttBrokerServerVerifyHostname", True):
+                    comDavra.logWarning('MQTT TLS hostname verification is disabled - not recommended for production')
+                    clientOfServer.tls_insecure_set(True)
+                    
+                comDavra.log('MQTT TLS configuration completed successfully')
+            except Exception as e:
+                comDavra.logError('Error configuring MQTT TLS: ' + str(e))
+                return
+        
         try:
-            clientOfServer.connect(comDavra.conf["mqttBrokerServerHost"])
+            comDavra.log('Connecting to MQTT broker at ' + comDavra.conf["mqttBrokerServerHost"] + ':' + str(mqttPort) + ' (TLS: ' + str(useTls) + ')')
+            clientOfServer.connect(comDavra.conf["mqttBrokerServerHost"], port=mqttPort)
             clientOfServer.loop_start() # Starts another thread to monitor incoming messages
+        except ssl.SSLError as e:
+            comDavra.logError('SSL/TLS error connecting to MQTT broker at ' + comDavra.conf["mqttBrokerServerHost"] + ':' + str(mqttPort) + ' - ' + str(e))
+            comDavra.logError('Check TLS configuration, certificates, and that the MQTT broker supports the TLS version')
         except Exception as e:
-            comDavra.logError('Experienced error connecting to mqtt at ' + comDavra.conf["mqttBrokerServerHost"] + ":" + str(e))
+            comDavra.logError('Experienced error connecting to mqtt at ' + comDavra.conf["mqttBrokerServerHost"] + ':' + str(mqttPort) + ' - ' + str(e))
     else:
         comDavra.logError('No MQTT broker configured for Davra server')
 
