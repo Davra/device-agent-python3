@@ -56,10 +56,10 @@ The agent communicates with the Davra platform over MQTT and HTTP REST. Device a
 | `davra_sdk.py` | Public SDK for device application developers. |
 | `davra_lib.py` | Shared utilities: HTTP, logging, config, system info. |
 | `davra_setup.py` | Interactive setup script run during installation. |
-| `install.sh` | Installs system dependencies, Python packages, and systemd service. |
+| `install.sh` | Installs system dependencies, the Python virtual environment and the systemd service. |
 | `uninstall.sh` | Stops service and deactivates agent executables. |
 | `build.sh` | Builds the distributable `davra-agent.tar.gz` artifact. |
-| `requirements.txt` | Python package dependencies. |
+| `requirements.in` / `requirements.txt` | Python dependencies: direct, and fully pinned with hashes. |
 
 ---
 
@@ -68,41 +68,52 @@ The agent communicates with the Davra platform over MQTT and HTTP REST. Device a
 ### Prerequisites
 
 - Linux OS with systemd
-- Python 3.x
-- `curl`
+- **Python 3.12 or later** (Ubuntu 24.04 LTS, Debian 13 or later). The installer stops on older versions.
 - `apt`-based package manager (for automated dependency installation)
+- A Davra server reachable over **HTTPS**, and its MQTT broker over **MQTTS** (port 8883)
 
 ### Install from the Pre-built Artifact
 
 ```bash
-curl -LO downloads.davra.com/agents/device-agent-python3/main/davra-agent.tar.gz
+curl -LO https://downloads.davra.com/agents/device-agent-python3/main/davra-agent.tar.gz
+sha256sum -c build_checksum.txt   # compare with the published checksum
 tar -xvf davra-agent.tar.gz
-sudo davra-agent/install.sh
+sudo davra-agent/install.sh --server https://myplatform.davra.com --token-file /root/davra-token
 ```
 
 The installer will:
 
-1. Create `/usr/bin/davra/` and copy agent files there
-2. Install system packages: `curl`, `python3`, `python3-pip`, `mosquitto`
-3. Install Python dependencies from `requirements.txt`
-4. Run `davra_setup.py` to interactively configure the device
-5. Install and enable the `davra_agent` systemd service
+1. Check for Python 3.12 or later
+2. Create `/usr/bin/davra/` and copy the agent files there (root-owned, not writable by others)
+3. Install system packages: `python3-venv`, `mosquitto`
+4. Create the `davra-apps` group (see [Device apps and the local broker](#device-apps-and-the-local-broker))
+5. Create a virtual environment at `/usr/bin/davra/.venv` and install the hash-pinned Python dependencies from `requirements.txt`
+6. Run `davra_setup.py` to configure the device
+7. Install and enable the `davra_agent` systemd service
 
-### Interactive Setup (`davra_setup.py`)
+### Setup (`davra_setup.py`)
 
-During installation you will be prompted for:
+Setup takes its values from these options, prompting only for anything missing (and only when run interactively):
 
-- **Davra server URL** — e.g. `https://myplatform.davra.com`
-- **API token** — Bearer token for the device
+| Option | Purpose |
+|---|---|
+| `--server URL` | Davra server URL. Must be `https://`. |
+| `--token-file FILE` | File containing the device API token. Alternatively set `DAVRA_API_TOKEN`, or type it at the (hidden) prompt. |
+| `--insecure-dev` | **Development only.** Allows an `http://` server and MQTT without TLS. Reported in the agent heartbeat. Re-running setup without it switches it off. |
+| `--allow-anonymous-local-mqtt` | Temporarily lets device apps built with an older SDK use the local broker without credentials. |
+| `--secure-mqtt` | Only (re)configure the local MQTT broker, then exit. |
+| `--no-service-restart` | Do not restart the agent service at the end of setup. |
 
-Setup will then:
+`--token` is still accepted but deprecated: a token on the command line is visible to other users on the device.
 
-- Verify connectivity to the server
-- Auto-detect the MQTT broker address
-- Configure TLS/SSL settings for the MQTT connection (optional)
+Setup will:
+
+- Verify the server is reachable over HTTPS and that the token belongs to a device
+- Auto-detect the MQTT broker address and configure MQTTS (TLS 1.2+, certificate and hostname verification)
 - Set default `heartbeatInterval` (600 seconds) and `scriptMaxTime` (600 seconds)
 - Create default metrics on the platform (`cpu`, `ram`, `uptime`)
-- Write configuration to `/usr/bin/davra/config.json`
+- Secure the local MQTT broker with generated credentials
+- Write configuration to `/usr/bin/davra/config.json` (readable by root only)
 
 ### Uninstall
 
@@ -116,63 +127,55 @@ Stops the service and renames agent executables (preserves logs and configuratio
 
 ## Configuration
 
-All agent configuration lives in `/usr/bin/davra/config.json`.
+All agent configuration lives in `/usr/bin/davra/config.json`, which is readable by root only. Secrets in it (`apiToken`, `localMqttAgentPassword`) are never sent to the platform, logged or given to device apps; reports of the configuration show them as `***REDACTED***`.
 
 | Key | Description | Default |
 |---|---|---|
-| `server` | Davra platform base URL | set during setup |
+| `server` | Davra platform base URL (`https://`) | set during setup |
 | `UUID` | Device UUID on the platform | set during setup |
-| `apiToken` | Bearer token for API/MQTT auth | set during setup |
-| `heartbeatInterval` | Seconds between heartbeats and job polls | `600` |
-| `scriptMaxTime` | Maximum seconds allowed for a script or function | `600` |
-| `mqttBrokerServerHost` | Remote MQTT broker hostname | `mqtt.davra.com` |
+| `apiToken` | Bearer token for the platform API and MQTT broker | set during setup |
+| `heartbeatInterval` | Seconds between heartbeats and job polls (10–86400) | `600` |
+| `scriptMaxTime` | Maximum seconds allowed for a script or function (1–86400) | `600` |
+| `mqttBrokerServerHost` | Platform MQTT broker hostname | `mqtt.davra.com` |
+| `mqttBrokerServerPort` | Platform MQTT broker port | `8883` |
 | `mqttBrokerAgentHost` | Local MQTT broker address | `127.0.0.1` |
-| `mqttBrokerServerPort` | Remote MQTT broker port | `1883` (plain), `8883` (TLS) |
-| `mqttRestrictions` | Set to `"localhost"` to restrict local broker to loopback | `"localhost"` |
+| `localMqttAgentPassword` | The agent's password on the local broker | generated by setup |
+| `insecureDevMode` | Set by `--insecure-dev`. Never use in production. | absent |
 | `capabilities` | Map of registered device capabilities | `{}` |
 
-### MQTT TLS/SSL Configuration
+`agent-action-updateAgentConfig` cannot change connection or security settings: `server`, `apiToken`, `UUID`, `capabilities`, `insecureDevMode`, `service`, `agentRepository`, or any `mqtt*` / `localMqtt*` key.
 
-The agent supports secure MQTT connections. TLS can be configured during setup or by manually editing `config.json`.
+### MQTT TLS Configuration
+
+The connection to the platform MQTT broker always uses TLS 1.2 or later, with certificate and hostname verification. Only `--insecure-dev` allows a plain connection.
 
 | Key | Type | Description |
 |---|---|---|
-| `mqttBrokerServerUseTLS` | boolean | Enable TLS for the remote MQTT connection |
-| `mqttBrokerServerPort` | integer | Port override — typically `8883` when TLS is enabled |
-| `mqttBrokerServerCaCert` | string | Path to CA certificate file (uses system default if omitted) |
-| `mqttBrokerServerClientCert` | string | Path to client certificate (for mutual TLS) |
-| `mqttBrokerServerClientKey` | string | Path to client private key (required when client cert is set) |
-| `mqttBrokerServerTlsVersion` | string | TLS version e.g. `"TLSv1.2"` — leave unset for auto-negotiation (recommended) |
-| `mqttBrokerServerCertRequired` | boolean | Enforce certificate verification (default: `true`) |
-| `mqttBrokerServerVerifyHostname` | boolean | Verify the server hostname matches its certificate (default: `true`) |
+| `mqttBrokerServerUseTLS` | boolean | `true`. Can only be `false` in insecure dev mode. |
+| `mqttBrokerServerPort` | integer | `8883` |
+| `mqttBrokerServerCaCert` | string | Path to a CA certificate file (uses the system trust store if omitted) |
+| `mqttBrokerServerClientCert` | string | Path to a client certificate (for mutual TLS) |
+| `mqttBrokerServerClientKey` | string | Path to the client private key (required when a client cert is set) |
 
-Example `config.json` snippet for TLS:
+The settings `mqttBrokerServerTlsVersion`, `mqttBrokerServerCertRequired` and `mqttBrokerServerVerifyHostname` from earlier versions are no longer supported. Setup removes them.
 
-```json
-{
-  "mqttBrokerServerHost": "mqtt.davra.com",
-  "mqttBrokerServerUseTLS": true,
-  "mqttBrokerServerPort": 8883,
-  "mqttBrokerServerCaCert": "/path/to/ca.crt",
-  "mqttBrokerServerCertRequired": true,
-  "mqttBrokerServerVerifyHostname": true
-}
-```
+### Device apps and the local broker
 
-For mutual TLS, add:
+The local Mosquitto broker listens on `127.0.0.1:1883` only, does not allow anonymous connections, and limits clients to the `/agent` topic. Setup writes:
 
-```json
-{
-  "mqttBrokerServerClientCert": "/path/to/client.crt",
-  "mqttBrokerServerClientKey": "/path/to/client.key"
-}
-```
+| File | Contents |
+|---|---|
+| `/etc/mosquitto/conf.d/davra.conf` | Listener, authentication and ACL settings |
+| `/etc/mosquitto/davra_passwd`, `/etc/mosquitto/davra_acl` | Password hashes and topic ACL |
+| `/usr/bin/davra/app_mqtt_credentials.json` | The credentials device apps use. Readable by root and the `davra-apps` group. |
 
-If TLS settings are absent the agent falls back to a standard unencrypted connection on port 1883.
+Device apps that run as a non-root user must be in the `davra-apps` group (`usermod -aG davra-apps <user>`).
+
+Messages from device apps are treated as untrusted. Apps can register their own capabilities, send IoT data, request the (redacted) agent configuration and report the result of a function they were asked to run. They cannot run agent functions (`agent-action-*`): only the Davra platform can.
 
 ### Log File
 
-Agent logs are written to `/var/log/davra_agent.log` with automatic rollover at 10 MB.
+Agent logs are written to `/var/log/davra_agent.log` (mode 640, group `adm`) with automatic rollover at 10 MB. Secrets are removed from log messages.
 
 ---
 
@@ -223,11 +226,10 @@ These functions can be triggered remotely from the Davra platform:
 | Function Name | Description |
 |---|---|
 | `agent-action-rebootDevice` | Reboots the device |
-| `agent-action-pushAppWithInstaller` | Downloads a `.tar.gz` from a URL and runs its `install.sh` |
-| `agent-action-pushAppSnap` | Snap package installation (stub — not fully implemented) |
+| `agent-action-pushAppWithInstaller` | Downloads a `.tar.gz` from an `https://` URL and runs its `install.sh`. If the optional `SHA-256` parameter is supplied, the download must match it. |
 | `agent-action-reportAgentConfig` | Sends current config as an event to the platform |
 | `agent-action-updateAgentConfig` | Updates a single config key and syncs to platform |
-| `agent-action-runScriptBash` | Executes an arbitrary bash script with a configurable timeout |
+| `agent-action-runScriptBash` | Executes an arbitrary bash script, as root, with a configurable timeout |
 
 ### Job Execution
 
@@ -291,18 +293,19 @@ davra_sdk.retrieveConfigFromAgent()
 config = davra_sdk.agentConfig  # Populated after the above call returns
 ```
 
+### Credentials
+
+The SDK reads the app credentials from `/usr/bin/davra/app_mqtt_credentials.json` automatically. Run the app as root or as a member of the `davra-apps` group.
+
 ### Connecting with TLS
 
-To connect the SDK with TLS enabled, pass a `tlsConfig` dict to `connectToAgent`:
+To connect the SDK with TLS enabled, pass a `tlsConfig` dict to `connectToAgent`. TLS 1.2 or later with certificate and hostname verification is always used.
 
 ```python
 import davra_sdk
 
 tls_config = {
     "ca_certs": "/path/to/ca.crt",
-    "tls_version": "TLSv1.2",
-    "cert_required": True,
-    "verify_hostname": True,
     "port": 8883
 }
 
@@ -340,9 +343,9 @@ davra_sdk.waitUntilAgentIsConnected(timeoutSeconds=30)
 
 | Function | Description |
 |---|---|
-| `runCommandWithTimeout(command, timeout)` | Runs a shell command string with a timeout. Returns stdout as a string. |
+| `runCommandWithTimeout(command, timeout)` | Runs a command with a timeout and returns `(exitCode, stdout)`. Pass a list of arguments; a string runs in a shell, so only build it from trusted values. |
 | `loadAppConfiguration(davraAppConfigFile)` | Loads a JSON config file for the application. |
-| `loadAgentConfigurationFile()` | Reads the agent config from `/usr/bin/davra/config.json`. |
+| `loadAgentConfigurationFile()` | Deprecated; returns `{}`. Use `retrieveConfigFromAgent()`. |
 
 #### State Properties
 
@@ -351,7 +354,6 @@ davra_sdk.waitUntilAgentIsConnected(timeoutSeconds=30)
 | `davra_sdk.agentConfig` | Dict of agent configuration, populated after `retrieveConfigFromAgent()`. |
 | `davra_sdk.lastSeenAgent` | Epoch milliseconds when the agent last sent a heartbeat. |
 | `davra_sdk.mqttBrokerAgentHost` | Local broker address (default `127.0.0.1`). Override before calling `connectToAgent` if needed. |
-| `davra_sdk.useAdvancedMqttAuthorisation` | Set to `True` to enable MQTT username/password auth using UUID and API token. |
 
 ---
 
@@ -391,7 +393,7 @@ davra_sdk.waitUntilAgentIsConnected(timeoutSeconds=30)
 
 ## Platform REST API (Reference)
 
-The agent uses the following Davra platform endpoints. All requests use `Authorization: Bearer <apiToken>`.
+The agent uses the following Davra platform endpoints. Requests to the Davra server use `Authorization: Bearer <apiToken>`; the token is never sent to any other host.
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -416,7 +418,7 @@ Produces:
 
 - `build/davra-agent.tar.gz` — installable artifact
 - `build/build_version.txt` — agent version string
-- `build/build_checksum.txt` — MD5 checksum of the artifact
+- `build/build_checksum.txt` — SHA-256 checksum of the artifact
 - `build/build_jenkins.txt` — CI build metadata
 
 ---
@@ -425,48 +427,52 @@ Produces:
 
 ### Python Packages
 
-| Package | Version | Purpose |
-|---|---|---|
-| `paho-mqtt` | 1.4.0 | MQTT client (local and remote) |
-| `requests` | 2.20.0 | HTTP REST client |
-| `jsonschema` | 3.0.1 | JSON validation |
-| `python-dateutil` | 2.6.1 | Date/time utilities |
-| `six` | 1.15.0 | Python 2/3 compatibility shim |
-| `uuid` | — | UUID generation |
+Direct dependencies are listed in `requirements.in`. `requirements.txt` pins every package, including transitive ones, by version and hash, and is generated with:
+
+```bash
+uv pip compile davra-agent/requirements.in --upgrade --generate-hashes --python-version 3.12 -o davra-agent/requirements.txt
+```
+
+| Package | Purpose |
+|---|---|
+| `paho-mqtt` 2.x | MQTT client (local and platform). The SDK also works with paho-mqtt 1.x. |
+| `requests` | HTTP REST client |
 
 ### System Packages
 
-- `python3` / `python3-pip`
+- `python3` (3.12+) and `python3-venv`
 - `mosquitto` (local MQTT broker)
-- `curl`
 - `systemd`
 
 ---
 
-## Security Considerations
+## Security Model
 
-> **Note:** This codebase has not been audited for production security hardening. Review carefully before deploying in sensitive environments.
+- The agent runs as root because it runs jobs for the platform: scripts, app installs and reboots. Anyone who can create jobs for a device on the platform can run commands on it as root, so platform access control is part of the device's security.
+- All traffic to the platform uses HTTPS and MQTTS (TLS 1.2+, verified certificates and hostnames).
+- The device API token is stored in `/usr/bin/davra/config.json` (root only). It is sent only to the configured Davra server, and is never logged, reported in events or given to device apps.
+- Agent functions can only be started by the platform. Device apps on the local broker are authenticated and cannot run them.
+- Working files (`currentJob`, `currentFunction`) are root only. Scripts are written with exclusive-create and run straight away.
+- Application packages are downloaded over HTTPS without credentials, size-limited, optionally SHA-256 verified and extracted with path-traversal protection.
+- Protect any client key files with strict permissions (`chmod 600`) and keep certificates current.
 
-- API tokens are stored in plaintext in `/usr/bin/davra/config.json`. Ensure appropriate file permissions.
-- The `agent-action-runScriptBash` function executes arbitrary bash scripts sent from the platform. Trust in the platform's access controls is assumed.
-- The local MQTT broker is restricted to `127.0.0.1` by default (`mqttRestrictions: "localhost"`). Changing this exposes it to the network.
-- MQTT authentication (device UUID + API token) is optional and disabled by default. Enable via `useAdvancedMqttAuthorisation`.
-- Script execution is bounded by `scriptMaxTime`, but input to scripts is not sanitized by the agent.
-- Always use TLS in production environments (`mqttBrokerServerUseTLS: true`).
-- Use TLS 1.2 or higher; leave `mqttBrokerServerTlsVersion` unset for auto-negotiation.
-- Protect private key files with strict permissions (`chmod 600`).
-- Keep certificates current and monitor expiration dates.
-- Enable mutual TLS (`mqttBrokerServerClientCert` + `mqttBrokerServerClientKey`) for additional authentication where supported.
+## Upgrading from 2.0.x
+
+Re-run `install.sh` from the new bundle. Note these changes:
+
+- Python 3.12 or later is required, and dependencies are installed in a virtual environment rather than system-wide. Device apps which relied on the agent installing `requests` or `paho-mqtt` system-wide must install them themselves.
+- An `http://` server URL, or MQTT without TLS, is refused. Change `server` in `config.json` to `https://` before upgrading, or use `--insecure-dev` in development only.
+- The local broker now requires credentials. Device apps must use the updated `davra_sdk.py` and run as root or in the `davra-apps` group. `--allow-anonymous-local-mqtt` keeps older apps working while they are updated.
+- Device apps can no longer send `runFunctionOnAgent`.
+- The installation event no longer includes a latitude/longitude estimate (setup no longer calls a GeoIP service).
 
 ---
 
 ## Known Limitations
 
-- No automated test suite is included in this repository.
-- `agent-action-pushAppSnap` (snap package installation) is a stub and not implemented.
-- All configuration is file-based; there is no environment variable support.
-- The `six` library and some Python 2 compatibility patterns remain from an earlier version.
-- Dependencies in `requirements.txt` are pinned to older versions and may contain known vulnerabilities.
+- Unit tests are in `tests/` (`python -m pytest tests`). There are no end-to-end tests against a live platform.
+- Application packages are not signed; the SHA-256 check is optional.
+- All configuration is file-based.
 
 ---
 

@@ -1,0 +1,4 @@
+# Direct dependencies of the Davra agent. Edit this file, then regenerate requirements.txt with:
+#   uv pip compile requirements.in --generate-hashes --python-version 3.12 -o requirements.txt
+paho-mqtt>=2.1,<3
+requests>=2.32.4,<3

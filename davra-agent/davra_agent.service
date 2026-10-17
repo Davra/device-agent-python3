@@ -1,16 +1,22 @@
 [Unit]
 Description=Davra Agent Service
+After=network-online.target mosquitto.service
+Wants=network-online.target
 
 [Service]
-Type=forking
-WorkingDirectory=/usr/bin/davra
-ExecStart=/usr/bin/python3 /usr/bin/davra/davra_agent.py >> /var/log/davra_agent.log 2>&1
-ExecStartPre=/bin/sleep 50
-After=multi-user.target
+# The agent runs as root: it runs jobs (scripts, app installs, reboot) for the Davra server.
 Type=simple
+WorkingDirectory=/usr/bin/davra
+ExecStartPre=/bin/sleep 50
+ExecStart=/usr/bin/davra/.venv/bin/python /usr/bin/davra/davra_agent.py
 KillMode=process
 Restart=always
 RestartSec=5
+# Hardening which does not restrict the jobs the agent runs
+PrivateTmp=true
+UMask=0022
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
