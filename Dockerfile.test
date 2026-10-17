@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for testing Davra Agent installation
 # Supports multiple OS versions and test scenarios
 
-ARG OS_VERSION=ubuntu:22.04
+ARG OS_VERSION=ubuntu:24.04
 FROM ${OS_VERSION}
 
 # Prevent interactive prompts during package installation
@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 # Install basic requirements
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tar \
     sudo \
@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 
 
 RUN apt-get update && \
-    apt-get install -y systemd systemd-sysv && \
+    apt-get install -y --no-install-recommends systemd systemd-sysv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
